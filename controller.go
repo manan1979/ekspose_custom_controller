@@ -27,25 +27,28 @@ func newController(clientset kubernetes.Interface, depInformer appsinformers.Dep
       queue: workqueue.NewNameRateLimitingQueue(workqueue.DefaultControllerRateLimiter(),"ekspose"),
  }
 
- depInformer.Informer().AddEventHandler{
-cache.ResourceEventHandler{
-  AddFunc: handleAdd,
+ depInformer.Informer().AddEventHandler(
+ cache.ResourceEventHandle{
+              AddFunc: handleAd,
   DeleteFunc: handleDel,
 
-}
- }
+},
+ )
  return c 
 
 }
 
-func (c *controller) run(ch ->chan struct{}) {
+func (c *controller) run(ch <-chan struct{}) {
 if !cache.WaitForCacheSync(ch, c.depCacheSynced) {
-   fmt.Println("waiting for cache to be synced\n")_
+   fmt.Print("waiting for cache to be synced\n")
 
 }
 
-wait.Unitl()
+   go wait.Unitl(c.worker, 1*time.Second, ch)
 
+}
+
+func (c *controller) worker() {
 
 }
 
