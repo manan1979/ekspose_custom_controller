@@ -4,6 +4,8 @@ import (
 "fmt"
 "k8s.io/apimachinery/pkg/util/wait"
 "time"
+
+appsv1 "k8s.io/api/apps/v1"
 metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 appsinformers "k8s.io/client-go/informers/apps/v1"
 "k8s.io/client-go/kubernetes"
@@ -20,10 +22,7 @@ type controller struct {
    depLister appListers.DeploymentLister
    depCacheSynced cache.InformerSynced
    queue workqueue.RateLimitingInterface
- 
-
 }
-
 
 func newController(clientset kubernetes.Interface, depInformer appsinformers.DeploymentInformer) *controller {
  c := &controller{
@@ -34,72 +33,93 @@ func newController(clientset kubernetes.Interface, depInformer appsinformers.Dep
  }
 
  depInformer.Informer().AddEventHandler(
- cache.ResourceEventHandlerFuncs{
+    cache.ResourceEventHandlerFuncs{
               AddFunc: c.handleAdd,
               DeleteFunc: c.handleDel,
 
-},
+    },
  )
  return c 
-
 }
 
 
 func (c *controller) run(ch <-chan struct{}) {
     fmt.Println("starting controller")
-    if !cache.WaitForCacheSync(ch, c.depCacheSynced) {
-   fmt.Print("waiting for cache to be synced\n")
-
+     if !cache.WaitForCacheSync(ch, c.depCacheSynced) {
+     fmt.Print("waiting for cache to be synced\n")
 }
 
-   go wait.Until(c.worker, 1*time.Second, ch)
+     go wait.Until(c.worker, 1*time.Second, ch)
   
-   <-ch 
+     <-ch 
 }
 
 func (c *controller) worker() {
   for c.processItem() {
-   
   }
 }
 
 func (c *controller) processItem() bool {
     item, shutdown := c.queue.Get()
-    if shutdown {
-    return false
+      if shutdown {
+      return false
     }
-
+    defer c.queue.Forget(item)
     key, err := cache.MetaNamespaceKeyFunc(item)
-    if err != nil {
-    fmt.Printf("getting key from cache %s\n", err.Error())
+       if err != nil {
+       fmt.Printf("getting key from cache %s\n", err.Error())
     }
 
     ns, name, err := cache.SplitMetaNamespaceKey(key)
-    if err != nil {
-    fmt.Println("splitting key into namespace and name\n", err.Error())
+       if err != nil {
+       fmt.Println("splitting key into namespace and name\n", err.Error())
     }
    
     err =  c.syncDeployment(ns,name)
-    if err!= nil {
+      if err!= nil {
         //re-try
         fmt.Printf("syncing deployment %s\n",err.Error())
         return false 
-    }
+      }
     return true
-
-
 }
 
 func (c *controller) syncDeployment(ns ,name string) error {
    ctx := context.Background()
 
-  svc := corev1.Service{}
-  _,err := c.clientset.CoreV1().Services(ns).Create(ctx, &svc, metav1.CreateOptions{} )
+   dep, err := c.depLister.Deployments(ns).Get(name)
+      if err != nil {
+       fmt.Printf("getting deployment from lister %s\n", err.Error())
+   }
+
+  svc := corev1.Service{
+     ObjectMeta : metav1.ObjectMeta{
+         Name : dep.Name,
+         Namespace : ns,
+      },
+  Spec: corev1.ServiceSpec{
+       Selector: depLabels(*dep),
+       Ports: []corev1.ServicePort{
+            {  
+              Name: "http",
+              Port: 80, 
+
+            },
+       },
+
+     },
+
+  }
+  _, err = c.clientset.CoreV1().Services(ns).Create(ctx, &svc, metav1.CreateOptions{} )
     if err != nil {
-    fmt.Printf("creating service %s\n", err.Error())
+        fmt.Printf("creating service %s\n", err.Error())
     }
+
     return nil
-  
+}
+
+func depLabels(dep  appsv1.Deployment)  map[string] string  {
+    return dep.Spec.Template.Labels
 }
 
 func (c *controller) handleAdd(obj interface{}) {
