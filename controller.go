@@ -14,6 +14,7 @@ appListers "k8s.io/client-go/listers/apps/v1"
 "k8s.io/client-go/tools/cache"
 "k8s.io/client-go/util/workqueue"
 corev1 "k8s.io/api/core/v1"
+apierror "k8s.io/apimachinery/pkg/api/errors"
 "context"
 )
 
@@ -75,7 +76,26 @@ func (c *controller) processItem() bool {
        if err != nil {
        fmt.Println("splitting key into namespace and name\n", err.Error())
     }
-   
+    //check if the objects has been deleted from k8 cluster
+    _ ,err =  c.clientset.AppsV1().Deployments(ns).Get(context.Background(), name, metav1.GetOptions{})
+      if apierror.IsNotFound(err) {
+       fmt.Printf("handle delete event for dep %s\n", name)
+           
+       err := c.clientset.CoreV1().Services(ns).Delete(context.Background(), name, metav1.DeleteOptions{})
+        if err != nil {
+         fmt.Printf("deleting servcies %s, error %s\n", name, err.Error()) 
+         return false
+        }
+        
+        err = c.clientset.NetworkingV1().Ingresses(ns).Delete(context.Background(), name, metav1.DeleteOptions{})
+        if err != nil {
+           fmt.Printf("deleting ingress %s, error %s\n", name, err.Error())
+           return false
+        }
+        return true 
+      }
+
+
     err =  c.syncDeployment(ns,name)
       if err!= nil {
         //re-try
